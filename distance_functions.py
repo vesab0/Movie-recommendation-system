@@ -25,7 +25,7 @@ def cosine_similarity(v1, v2):
     norm2 = math.sqrt(sum(b * b for b in v2))
     
     if norm1 == 0 or norm2 == 0:
-        return 0.0  # One vector is all zeros
+        return 0.0 
     
     return dot_product / (norm1 * norm2)
 
