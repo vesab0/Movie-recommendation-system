@@ -3,7 +3,7 @@ from distance_functions import cosine_similarity, cosine_distance
 
 class CollaborativeKNN:
     
-    def __init__(self, ratings_by_movie, ratings_by_user, profiles, min_common_users=5):
+    def __init__(self, ratings_by_movie, ratings_by_user, profiles, min_common_users=40):
         self.ratings_by_movie = ratings_by_movie
         self.ratings_by_user = ratings_by_user
         self.profiles = profiles
@@ -92,7 +92,7 @@ if __name__ == "__main__":
     profiles, ratings_by_movie, ratings_by_user, vectors = cache_manager.load_everything()
     
     print("\nInitializing Collaborative KNN...")
-    knn = CollaborativeKNN(ratings_by_movie, ratings_by_user, profiles, min_common_users=5)
+    knn = CollaborativeKNN(ratings_by_movie, ratings_by_user, profiles, min_common_users=40)
     
     test_movie_id = 862
     test_movie = profiles[test_movie_id]

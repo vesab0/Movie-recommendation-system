@@ -13,16 +13,16 @@ class ContentVectorizer:
         self.collection_to_index = {}
         
         self.weights = {
-            'numerical': 1.0,
+            'numerical': 0.5,
             'collection': 5.0,
-            'genres': 3.0,
-            'keywords': 2.0,
-            'cast': 2.0,
-            'crew': 2.5,
-            'companies': 0.5,
-            'countries': 0.3,
-            'language': 0.5,
-            'binary': 0.5,
+            'genres': 2.0,
+            'keywords': 3.0,
+            'cast': 2.5,
+            'crew': 4.0,
+            'companies': 0.3,
+            'countries': 0.2,
+            'language': 0.3,
+            'binary': 0.3,
         }
         
         self.numerical_mins = {}
@@ -88,9 +88,9 @@ class ContentVectorizer:
                 if val is not None and val != 0:
                     numerical_values[field].append(val)
         
-        MIN_KEYWORD_COUNT = 5
+        MIN_KEYWORD_COUNT = 3
         MIN_COMPANY_COUNT = 3
-        MIN_CAST_COUNT = 3
+        MIN_CAST_COUNT = 2
         MIN_CREW_COUNT = 2
         
         all_keywords = {k for k, count in keyword_counts.items() if count >= MIN_KEYWORD_COUNT}

@@ -37,7 +37,12 @@ Perdoret libraria numpy qe ofron array object me veprime 50x me te shpejta se ar
 
 content_knn.py llogarit distancen e pikes qe na zgjedhim (filmit ne ket rast), me cdo pik tjeter ne graf. I kthen K (10) te paret 
 
-**collaborative_knn**
+**collaborative_knn.py**
 
-content_knn.py loops through every movie ne list, nese filmi ka common reviewers me filmin input, ather e bon run formulen e cila e kontrollon se users qe e bojn rate mire filmin input a e bojn rate mire edhe filmin tjeter. Nfund ata filma best rated prej common reviewers dalin 
+collaborative_knn.py loops through every movie ne list, nese filmi ka common reviewers me filmin input, ather e bon run formulen e cila e kontrollon se users qe e bojn rate mire filmin input a e bojn rate mire edhe filmin tjeter. Nfund ata filma best rated prej common reviewers dalin 
 
+##### Hapi 4:
+
+**hybrid_recommender.py**
+
+hybrid recommender runs both content knn and collaborative knn, dhe i bon boost filmat qe shfaqen ne te 2 listat. Nfund kthen 10 filmat me highest score.

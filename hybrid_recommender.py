@@ -2,10 +2,11 @@ import numpy as np
 from content_knn import ContentKNN
 from collaborative_knn import CollaborativeKNN
 from distance_functions import cosine_distance, cosine_similarity
+import vectorizer
 
 class HybridRecommender:
     
-    def __init__(self, content_knn, collaborative_knn, content_weight=0.5, collab_weight=0.5):
+    def __init__(self, content_knn, collaborative_knn, content_weight=0.85, collab_weight=0.15):
         self.content_knn = content_knn
         self.collaborative_knn = collaborative_knn
         self.content_weight = content_weight
@@ -49,8 +50,12 @@ class HybridRecommender:
             l_score = collab_scores.get(mid, 0.0) * self.collab_weight
             
             # Consensus boost: both paths agree
-            consensus_bonus = 0.15 if mid in content_scores and mid in collab_scores else 0.0
-            
+            if mid in content_scores and mid in collab_scores:
+                consensus_bonus = 0.1 * (content_scores[mid] + collab_scores[mid]) / 2
+            else:
+                consensus_bonus = 0.0
+
+            final_scores[mid] = c_score + l_score + consensus_bonus
             final_scores[mid] = c_score + l_score + consensus_bonus
         
         # --- Rank and return ---
@@ -78,18 +83,20 @@ if __name__ == "__main__":
     import cacher as cache_manager
     from content_knn import ContentKNN
     from collaborative_knn import CollaborativeKNN
-    
+
     print("Loading data...")
     profiles, ratings_by_movie, ratings_by_user, vectors = cache_manager.load_everything()
     
     print("\nInitializing recommenders...")
     content_knn = ContentKNN(vectors, profiles)
-    collab_knn = CollaborativeKNN(ratings_by_movie, ratings_by_user, profiles, min_common_users=10)
+    collab_knn = CollaborativeKNN(ratings_by_movie, ratings_by_user, profiles, min_common_users=40)
 
-    hybrid = HybridRecommender(content_knn, collab_knn, content_weight=0.5, collab_weight=0.5)
-    
+    hybrid = HybridRecommender(content_knn, collab_knn, content_weight=0.7, collab_weight=0.3)
+
     test_movie_id = 862
     test_movie = profiles[test_movie_id]
+
+
     
     print(f"\n{'=' * 60}")
     print(f"HYBRID RECOMMENDATIONS")
