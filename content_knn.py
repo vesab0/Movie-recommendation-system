@@ -63,7 +63,7 @@ if __name__ == "__main__":
     print("\nInitializing Content KNN...")
     knn = ContentKNN(vectors, profiles, distance_fn=cosine_distance)
     
-    test_movie_id = 100
+    test_movie_id = 862
     test_movie = profiles[test_movie_id]
     
     print(f"\n{'=' * 60}")

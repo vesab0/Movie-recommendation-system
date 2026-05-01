@@ -33,3 +33,11 @@ Perdoret libraria numpy qe ofron array object me veprime 50x me te shpejta se ar
 
 ##### Hapi 3: 
 
+**content_knn.py**
+
+content_knn.py llogarit distancen e pikes qe na zgjedhim (filmit ne ket rast), me cdo pik tjeter ne graf. I kthen K (10) te paret 
+
+**collaborative_knn**
+
+content_knn.py loops through every movie ne list, nese filmi ka common reviewers me filmin input, ather e bon run formulen e cila e kontrollon se users qe e bojn rate mire filmin input a e bojn rate mire edhe filmin tjeter. Nfund ata filma best rated prej common reviewers dalin 
+
