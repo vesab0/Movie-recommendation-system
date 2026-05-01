@@ -1,5 +1,5 @@
 from distance_functions import cosine_distance, cosine_similarity
-
+import numpy as np
 
 class ContentKNN:
     def __init__(self, vectors, profiles, distance_fn=cosine_distance):
@@ -54,7 +54,7 @@ class ContentKNN:
 
 
 if __name__ == "__main__":
-    import numpy as np
+
     import cacher as cache_manager
     
     print("Loading data and vectors...")
