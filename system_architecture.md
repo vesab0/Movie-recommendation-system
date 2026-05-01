@@ -19,7 +19,7 @@ Loader.py merret me krijimin e strukturave te python per te filluar algoritmin. 
 
 Per te funksionuar algoritmi KNN, te gjitha te dhenat duhet te kthehen ne numra dhe te gjitha features ne dimenzione. Kjo esht puna e vectorizer, i cili merr cdo film edhe e kthen ne vektor te numrave qe perfaqson nje pik ne hapsir N (35 ne datasetin tone) dimenzionale. 
 
-Per perkthimin e vlerave string ne vlera numerike, vectorizer.py krijon dictionaries ku cdo vlere unike qe gjindet ne dataset i behet assign ni value.
+Per perkthimin e vlerave string ne vlera numerike, vectorizer.py krijon dictionaries ku cdo vlere unike qe gjindet ne dataset i behet assign ni value. Largohen vlerat te cilat nuk plotesojne nje kusht te caktuar, qe te mos ngarkohet modeli me psh aktor qe jan vetem ne 1 film 2, apo vlera tjera te cilat nuk perseriten mjaftueshem qe me ndiku ne llogaritje te ngjashmerise.
 
 Vlerat boolean vazhdojne si 1 ose 0 kurse vlerat numerike mbesin te tilla
 
@@ -28,6 +28,8 @@ Merren filmat e fituar nga Hapi 1 dhe per secilin cdo feature kthehet ne vlere n
 **cacher.py**
 
 Cacher.py thirr loader.py dhe vectorizer.py in that order dhe i ben cache rezultatet.
+
+Perdoret libraria numpy qe ofron array object me veprime 50x me te shpejta se array klasik i python, si dhe operacione tjera matematikore me te shpejta. Ofron kompresim te strukturave numerike, na lejon qe vector cache te ket madhesi te arsyeshme
 
 ##### Hapi 3: 
 

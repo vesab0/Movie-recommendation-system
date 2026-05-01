@@ -1,52 +1,48 @@
-import math
-import os
+import numpy as np
+
 
 class ContentVectorizer:
-
     def __init__(self):
         self.genre_to_index = {}
         self.keyword_to_index = {}
         self.company_to_index = {}
         self.country_to_index = {}
         self.language_to_index = {}
-        self.cast_to_index = {} 
+        self.cast_to_index = {}
         self.crew_job_to_index = {}
         self.collection_to_index = {}
         
         self.weights = {
-            'numerical': 1.0,      
-            'collection': 5.0,       
-            'genres': 3.0,           
-            'keywords': 2.0,         
-            'cast': 2.0,             
-            'crew': 2.5,             
-            'companies': 0.5,        
-            'countries': 0.3,        
-            'language': 0.5,         
-            'binary': 0.5,           
+            'numerical': 1.0,
+            'collection': 5.0,
+            'genres': 3.0,
+            'keywords': 2.0,
+            'cast': 2.0,
+            'crew': 2.5,
+            'companies': 0.5,
+            'countries': 0.3,
+            'language': 0.5,
+            'binary': 0.5,
         }
         
         self.numerical_mins = {}
         self.numerical_maxs = {}
-        
         self.vector_size = 0
-        
         self.numerical_fields = [
             'budget', 'revenue', 'runtime', 'popularity',
             'vote_average', 'vote_count'
         ]
 
     def fit(self, profiles):
-
         print("Fitting vectorizer: building vocabularies...")
         
         all_genres = set()
-        all_keywords = set()
-        all_companies = set()
+        keyword_counts = {}
+        company_counts = {}
         all_countries = set()
         all_languages = set()
-        all_cast = set()
-        all_crew_jobs = set()
+        cast_counts = {}
+        crew_counts = {}
         all_collections = set()
         
         numerical_values = {field: [] for field in self.numerical_fields}
@@ -58,11 +54,11 @@ class ContentVectorizer:
             
             for k in profile.get('keywords', []):
                 if isinstance(k, dict) and 'name' in k:
-                    all_keywords.add(k['name'])
+                    keyword_counts[k['name']] = keyword_counts.get(k['name'], 0) + 1
             
             for c in profile.get('production_companies', []):
                 if isinstance(c, dict) and 'name' in c:
-                    all_companies.add(c['name'])
+                    company_counts[c['name']] = company_counts.get(c['name'], 0) + 1
             
             for c in profile.get('production_countries', []):
                 if isinstance(c, dict) and 'name' in c:
@@ -71,16 +67,17 @@ class ContentVectorizer:
             for l in profile.get('spoken_languages', []):
                 if isinstance(l, dict) and 'name' in l:
                     all_languages.add(l['name'])
-        
+            
             for actor in profile.get('cast', [])[:5]:
                 if isinstance(actor, dict) and 'name' in actor:
-                    all_cast.add(actor['name'])
+                    cast_counts[actor['name']] = cast_counts.get(actor['name'], 0) + 1
             
             key_jobs = {'Director', 'Writer', 'Screenplay', 'Producer', 'Original Music Composer'}
             for member in profile.get('crew', []):
                 if isinstance(member, dict) and 'job' in member and 'name' in member:
                     if member['job'] in key_jobs:
-                        all_crew_jobs.add(f"{member['job']}:{member['name']}")
+                        entry = f"{member['job']}:{member['name']}"
+                        crew_counts[entry] = crew_counts.get(entry, 0) + 1
             
             collection = profile.get('belongs_to_collection')
             if isinstance(collection, dict) and 'name' in collection:
@@ -90,6 +87,16 @@ class ContentVectorizer:
                 val = profile.get(field)
                 if val is not None and val != 0:
                     numerical_values[field].append(val)
+        
+        MIN_KEYWORD_COUNT = 5
+        MIN_COMPANY_COUNT = 3
+        MIN_CAST_COUNT = 3
+        MIN_CREW_COUNT = 2
+        
+        all_keywords = {k for k, count in keyword_counts.items() if count >= MIN_KEYWORD_COUNT}
+        all_companies = {c for c, count in company_counts.items() if count >= MIN_COMPANY_COUNT}
+        all_cast = {a for a, count in cast_counts.items() if count >= MIN_CAST_COUNT}
+        all_crew_jobs = {j for j, count in crew_counts.items() if count >= MIN_CREW_COUNT}
         
         self.genre_to_index = {g: i for i, g in enumerate(sorted(all_genres))}
         self.keyword_to_index = {k: i for i, k in enumerate(sorted(all_keywords))}
@@ -107,40 +114,40 @@ class ContentVectorizer:
                 self.numerical_maxs[field] = max(values)
             else:
                 self.numerical_mins[field] = 0
-                self.numerical_maxs[field] = 1 
+                self.numerical_maxs[field] = 1
         
         self.vector_size = (
-            len(self.numerical_fields) +           
-            2 +                                   
-            1 +                                
-            len(self.genre_to_index) +            
-            len(self.keyword_to_index) +           
-            len(self.company_to_index) +         
-            len(self.country_to_index) +         
-            len(self.language_to_index) +     
-            len(self.cast_to_index) +        
-            len(self.crew_job_to_index) +       
-            len(self.collection_to_index)     
+            len(self.numerical_fields) +
+            2 + 1 +
+            len(self.genre_to_index) +
+            len(self.keyword_to_index) +
+            len(self.company_to_index) +
+            len(self.country_to_index) +
+            len(self.language_to_index) +
+            len(self.cast_to_index) +
+            len(self.crew_job_to_index) +
+            len(self.collection_to_index)
         )
         
         print(f"  -> Genres: {len(self.genre_to_index)}")
-        print(f"  -> Keywords: {len(self.keyword_to_index)}")
-        print(f"  -> Companies: {len(self.company_to_index)}")
+        print(f"  -> Keywords: {len(self.keyword_to_index)} (filtered from {len(keyword_counts)})")
+        print(f"  -> Companies: {len(self.company_to_index)} (filtered from {len(company_counts)})")
         print(f"  -> Countries: {len(self.country_to_index)}")
         print(f"  -> Languages: {len(self.language_to_index)}")
-        print(f"  -> Cast members: {len(self.cast_to_index)}")
-        print(f"  -> Crew entries: {len(self.crew_job_to_index)}")
+        print(f"  -> Cast members: {len(self.cast_to_index)} (filtered from {len(cast_counts)})")
+        print(f"  -> Crew entries: {len(self.crew_job_to_index)} (filtered from {len(crew_counts)})")
         print(f"  -> Collections: {len(self.collection_to_index)}")
         print(f"  -> Total vector dimensions: {self.vector_size}")
     
     def vectorize(self, profile):
-        vector = [0.0] * self.vector_size
-        idx = 0 
+        vector = np.zeros(self.vector_size, dtype=np.float32)
+        idx = 0
         
         for field in self.numerical_fields:
             raw_value = profile.get(field, 0)
             if raw_value is None:
                 raw_value = 0
+            
             min_val = self.numerical_mins[field]
             max_val = self.numerical_maxs[field]
             
@@ -148,13 +155,13 @@ class ContentVectorizer:
                 normalized = (raw_value - min_val) / (max_val - min_val)
             else:
                 normalized = 0.0
-
+            
             vector[idx] = normalized * self.weights['numerical']
             idx += 1
         
         vector[idx] = (1.0 if profile.get('adult') else 0.0) * self.weights['binary']
         idx += 1
-
+        
         vector[idx] = (1.0 if profile.get('video') else 0.0) * self.weights['binary']
         idx += 1
         
@@ -249,9 +256,8 @@ class ContentVectorizer:
         idx += len(self.collection_to_index)
         
         return vector
- 
+    
     def vectorize_all(self, profiles):
-
         print("Vectorizing all movies...")
         vectors = {}
         
@@ -263,61 +269,22 @@ class ContentVectorizer:
 
 
 if __name__ == "__main__":
-
     import cacher as cache_manager
-    import distance_functions as dist_funcs
     
-    # Load data (from cache if available)
     profiles, ratings_by_movie, ratings_by_user = cache_manager.load_all_data_with_cache()
     
-    # Create and fit the vectorizer
     vectorizer = ContentVectorizer()
     vectorizer.fit(profiles)
-    
-    # Vectorize all movies
     vectors = vectorizer.vectorize_all(profiles)
     
-    # Test: pick a movie and show its vector stats
-    example_id = 862  # Toy Story
+    example_id = 862
     if example_id in vectors:
         vec = vectors[example_id]
-        non_zero = sum(1 for x in vec if x != 0.0)
+        non_zero = np.count_nonzero(vec)
         print(f"\nExample vector for movieId {example_id} ({profiles[example_id]['title']}):")
         print(f"  Vector length: {len(vec)}")
         print(f"  Non-zero dimensions: {non_zero}")
         print(f"  Sparsity: {100 * (1 - non_zero/len(vec)):.1f}%")
-        print(f"\n  Active features (non-zero):")
-        
-        # Numerical
-        numerical_start = 0
-        for i, field in enumerate(vectorizer.numerical_fields):
-            if vec[numerical_start + i] > 0:
-                print(f"    {field}: {vec[numerical_start + i]:.4f}")
-        
-        # Genres
-        genre_start = len(vectorizer.numerical_fields) + 3  # after numerical + binary + has_collection
-        for genre, idx in vectorizer.genre_to_index.items():
-            val = vec[genre_start + idx]
-            if val > 0:
-                print(f"    Genre '{genre}': {val:.1f}")
-        
-        # Collection
-        coll_start = genre_start + len(vectorizer.genre_to_index) + len(vectorizer.keyword_to_index) + \
-                     len(vectorizer.company_to_index) + len(vectorizer.country_to_index) + \
-                     len(vectorizer.language_to_index) + len(vectorizer.cast_to_index) + \
-                     len(vectorizer.crew_job_to_index)
-        for coll, idx in vectorizer.collection_to_index.items():
-            val = vec[coll_start + idx]
-            if val > 0:
-                print(f"    Collection '{coll}': {val:.1f}")
-        
-        # Quick distance test to another movie
-        other_id = 863  # Usually another movie
-        if other_id in vectors:
-            dist = dist_funcs.cosine_distance(vec, vectors[other_id])
-            sim = dist_funcs.cosine_similarity(vec, vectors[other_id])
-            print(f"\n  Distance to movieId {other_id} ({profiles.get(other_id, {}).get('title', 'N/A')}):")
-            print(f"    Cosine similarity: {sim:.4f}")
-            print(f"    Cosine distance: {dist:.4f}")
     
-    print("\nStep 2 complete. Vectors ready for KNN.")
+    print(f"\nTotal vectors ready: {len(vectors)}")
+    print("Step 2 complete.")
