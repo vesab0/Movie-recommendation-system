@@ -1,4 +1,9 @@
 import numpy as np
+from config import (
+    VECTORIZER_WEIGHTS, NUMERICAL_FIELDS,
+    MIN_KEYWORD_COUNT, MIN_COMPANY_COUNT, MIN_CAST_COUNT, MIN_CREW_COUNT,
+    CAST_LIMIT, KEY_CREW_JOBS,
+)
 
 
 class ContentVectorizer:
@@ -11,27 +16,13 @@ class ContentVectorizer:
         self.cast_to_index = {}
         self.crew_job_to_index = {}
         self.collection_to_index = {}
-        
-        self.weights = {
-            'numerical': 0.5,
-            'collection': 5.0,
-            'genres': 2.0,
-            'keywords': 3.0,
-            'cast': 2.5,
-            'crew': 4.0,
-            'companies': 0.3,
-            'countries': 0.2,
-            'language': 0.3,
-            'binary': 0.3,
-        }
-        
+
+        self.weights = VECTORIZER_WEIGHTS
+
         self.numerical_mins = {}
         self.numerical_maxs = {}
         self.vector_size = 0
-        self.numerical_fields = [
-            'budget', 'revenue', 'runtime', 'popularity',
-            'vote_average', 'vote_count'
-        ]
+        self.numerical_fields = NUMERICAL_FIELDS
 
     def fit(self, profiles):
         print("Fitting vectorizer: building vocabularies...")
@@ -68,14 +59,13 @@ class ContentVectorizer:
                 if isinstance(l, dict) and 'name' in l:
                     all_languages.add(l['name'])
             
-            for actor in profile.get('cast', [])[:5]:
+            for actor in profile.get('cast', [])[:CAST_LIMIT]:
                 if isinstance(actor, dict) and 'name' in actor:
                     cast_counts[actor['name']] = cast_counts.get(actor['name'], 0) + 1
-            
-            key_jobs = {'Director', 'Writer', 'Screenplay', 'Producer', 'Original Music Composer'}
+
             for member in profile.get('crew', []):
                 if isinstance(member, dict) and 'job' in member and 'name' in member:
-                    if member['job'] in key_jobs:
+                    if member['job'] in KEY_CREW_JOBS:
                         entry = f"{member['job']}:{member['name']}"
                         crew_counts[entry] = crew_counts.get(entry, 0) + 1
             
@@ -87,11 +77,6 @@ class ContentVectorizer:
                 val = profile.get(field)
                 if val is not None and val != 0:
                     numerical_values[field].append(val)
-        
-        MIN_KEYWORD_COUNT = 3
-        MIN_COMPANY_COUNT = 3
-        MIN_CAST_COUNT = 2
-        MIN_CREW_COUNT = 2
         
         all_keywords = {k for k, count in keyword_counts.items() if count >= MIN_KEYWORD_COUNT}
         all_companies = {c for c, count in company_counts.items() if count >= MIN_COMPANY_COUNT}
@@ -118,7 +103,7 @@ class ContentVectorizer:
         
         self.vector_size = (
             len(self.numerical_fields) +
-            2 + 1 +
+            2 +  # adult, video
             len(self.genre_to_index) +
             len(self.keyword_to_index) +
             len(self.company_to_index) +
@@ -161,14 +146,10 @@ class ContentVectorizer:
         
         vector[idx] = (1.0 if profile.get('adult') else 0.0) * self.weights['binary']
         idx += 1
-        
+
         vector[idx] = (1.0 if profile.get('video') else 0.0) * self.weights['binary']
         idx += 1
-        
-        has_collection = 1.0 if profile.get('belongs_to_collection') else 0.0
-        vector[idx] = has_collection * self.weights['collection']
-        idx += 1
-        
+
         movie_genres = set()
         for g in profile.get('genres', []):
             if isinstance(g, dict) and 'name' in g:
@@ -224,7 +205,7 @@ class ContentVectorizer:
         idx += len(self.language_to_index)
         
         movie_cast = set()
-        for actor in profile.get('cast', [])[:5]:
+        for actor in profile.get('cast', [])[:CAST_LIMIT]:
             if isinstance(actor, dict) and 'name' in actor:
                 movie_cast.add(actor['name'])
         
@@ -233,11 +214,10 @@ class ContentVectorizer:
                 vector[idx + cast_idx] = 1.0 * self.weights['cast']
         idx += len(self.cast_to_index)
         
-        key_jobs = {'Director', 'Writer', 'Screenplay', 'Producer', 'Original Music Composer'}
         movie_crew = set()
         for member in profile.get('crew', []):
             if isinstance(member, dict) and 'job' in member and 'name' in member:
-                if member['job'] in key_jobs:
+                if member['job'] in KEY_CREW_JOBS:
                     movie_crew.add(f"{member['job']}:{member['name']}")
         
         for crew_entry, crew_idx in self.crew_job_to_index.items():

@@ -1,9 +1,10 @@
 from distance_functions import cosine_similarity, cosine_distance
+from config import MIN_COMMON_USERS
 
 
 class CollaborativeKNN:
-    
-    def __init__(self, ratings_by_movie, ratings_by_user, profiles, min_common_users=40):
+
+    def __init__(self, ratings_by_movie, ratings_by_user, profiles, min_common_users=MIN_COMMON_USERS):
         self.ratings_by_movie = ratings_by_movie
         self.ratings_by_user = ratings_by_user
         self.profiles = profiles

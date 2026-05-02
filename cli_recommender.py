@@ -1,11 +1,12 @@
 from hybrid_recommender import HybridRecommender
 from content_knn import ContentKNN
 from collaborative_knn import CollaborativeKNN
+from multi_movie_recommender import MultiMovieRecommender
 import cacher as cache_manager
+from config import MIN_COMMON_USERS, CONTENT_WEIGHT, COLLAB_WEIGHT, RECOMMENDATIONS_K, SEARCH_MAX_RESULTS
 
 
 def find_movie_by_title(profiles, query):
-
     query_lower = query.lower().strip()
     matches = []
     
@@ -28,25 +29,18 @@ def find_movie_by_title(profiles, query):
             ))
     
     matches.sort(key=lambda x: x[3], reverse=True)
-    return [(m[0], m[1], m[2]) for m in matches[:10]]
+    return [(m[0], m[1], m[2]) for m in matches[:SEARCH_MAX_RESULTS]]
 
 
-def main():
-    print("Loading data and building recommenders...")
-    profiles, ratings_by_movie, ratings_by_user, vectors = cache_manager.load_everything()
-    
-    content_knn = ContentKNN(vectors, profiles)
-    collab_knn = CollaborativeKNN(ratings_by_movie, ratings_by_user, profiles, min_common_users=40)
-    hybrid = HybridRecommender(content_knn, collab_knn, content_weight=0.85, collab_weight=0.15)
-    
-    print(f"\nLoaded {len(profiles)} movies. Ready for queries.\n")
-    
+def pick_movie(profiles):
     while True:
-        query = input("Enter movie title (or 'quit' to exit): ").strip()
+        query = input("Movie title (or 'done' to finish, 'cancel' to abort): ").strip()
         
-        if query.lower() in ('quit', 'exit', 'q'):
-            print("Goodbye!")
-            break
+        if query.lower() in ('done', 'd'):
+            return 'done', None
+        
+        if query.lower() in ('cancel', 'c', 'abort'):
+            return 'cancel', None
         
         if not query:
             continue
@@ -54,50 +48,106 @@ def main():
         matches = find_movie_by_title(profiles, query)
         
         if not matches:
-            print(f"No movies found matching '{query}'. Try again.\n")
+            print(f"  No movies found matching '{query}'. Try again.")
             continue
         
-        selected_id = None
         if len(matches) == 1:
-            selected_id, title, year = matches[0]
-            print(f"Found: {title} ({year})")
-        else:
-            print(f"\nFound {len(matches)} matches:")
-            for i, (mid, title, year) in enumerate(matches, 1):
-                print(f"  {i}. {title} ({year}) [ID: {mid}]")
-            
-            choice = input("\nPick number (or 0 to search again): ").strip()
-            try:
-                idx = int(choice) - 1
-                if idx < 0 or idx >= len(matches):
-                    print("Cancelled.\n")
-                    continue
-                selected_id, title, year = matches[idx]
-            except ValueError:
-                print("Invalid input.\n")
+            mid, title, year = matches[0]
+            print(f"  -> Selected: {title} ({year})")
+            return mid, title
+        
+        print(f"\n  Found {len(matches)} matches:")
+        for i, (mid, title, year) in enumerate(matches, 1):
+            print(f"    {i}. {title} ({year})")
+        
+        choice = input("\n  Pick number (or 0 to search again): ").strip()
+        try:
+            idx = int(choice) - 1
+            if idx < 0 or idx >= len(matches):
+                print("  Cancelled, search again.")
                 continue
+            mid, title, year = matches[idx]
+            print(f"  -> Selected: {title} ({year})")
+            return mid, title
+        except ValueError:
+            print("  Invalid input, search again.")
+            continue
+
+
+def main():
+    print("Loading data and building recommenders...")
+    profiles, ratings_by_movie, ratings_by_user, vectors = cache_manager.load_everything()
+    
+    content_knn = ContentKNN(vectors, profiles)
+    collab_knn = CollaborativeKNN(ratings_by_movie, ratings_by_user, profiles, min_common_users=MIN_COMMON_USERS)
+    hybrid = HybridRecommender(content_knn, collab_knn, content_weight=CONTENT_WEIGHT, collab_weight=COLLAB_WEIGHT)
+    multi = MultiMovieRecommender(hybrid)
+    
+    print(f"\nLoaded {len(profiles)} movies. Ready.\n")
+    
+    while True:
+        # Collect movies from user
+        selected_movies = []
+        
+        print("Add movies you like (type 'done' when finished, 'cancel' to start over):")
+        
+        while True:
+            if not selected_movies:
+                prompt = "First movie: "
+            else:
+                prompt = f"Next movie ({len(selected_movies)} so far): "
+            
+            print(prompt, end="")
+            mid, title = pick_movie(profiles)
+            
+            if mid == 'cancel':
+                selected_movies = []
+                print("Cleared. Starting over.\n")
+                continue
+            
+            if mid == 'done':
+                break
+            
+            # Avoid duplicates
+            if mid in [m[0] for m in selected_movies]:
+                print(f"  '{title}' already in list. Skipping.")
+                continue
+            
+            selected_movies.append((mid, title))
+            print(f"  Added '{title}' to your list.\n")
+        
+        if not selected_movies:
+            print("No movies selected. Try again or type 'quit' to exit.\n")
+            continue
+        
+        # Show collected movies
+        print(f"\n{'=' * 60}")
+        print(f"YOUR MOVIES ({len(selected_movies)}):")
+        for i, (mid, title) in enumerate(selected_movies, 1):
+            print(f"  {i}. {title}")
+        
+        # Get recommendations
+        movie_ids = [mid for mid, _ in selected_movies]
         
         print(f"\n{'=' * 60}")
-        print(f"Recommendations for: {title}")
+        print(f"RECOMMENDATIONS")
         print(f"{'=' * 60}")
         
-        recs = hybrid.recommend(selected_id, k=10)
+        recs = multi.recommend(movie_ids, k=RECOMMENDATIONS_K)
         
         if not recs:
             print("No recommendations found.")
-            continue
-        
-        for i, rec in enumerate(recs, 1):
-            sources = []
-            if rec['from_content']:
-                sources.append("C")
-            if rec['from_collab']:
-                sources.append("R")
-            source_str = "+".join(sources) if len(sources) == 2 else sources[0]
-            
-            print(f"{i:2d}. {rec['title']:<35} | Score: {rec['final_score']:.3f} | [{source_str}] | {', '.join(rec['genres'][:3])}")
+        else:
+            for i, rec in enumerate(recs, 1):
+                print(f"{i:2d}. {rec['title']:<35} | Score: {rec['final_score']:.3f} | {', '.join(rec['genres'][:3])}")
         
         print(f"{'=' * 60}\n")
+        
+        # Ask to continue or quit
+        again = input("Search again? (y/n): ").strip().lower()
+        if again not in ('y', 'yes'):
+            print("Goodbye!")
+            break
 
 
 if __name__ == "__main__":

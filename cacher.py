@@ -3,10 +3,10 @@ import os
 
 import loader
 from vectorizer import ContentVectorizer
-
-
-CACHE_FILENAME = "cached-data/movie_cache.pkl"
-VECTORS_CACHE_FILENAME = "cached-data/vectors_cache.pkl"
+from config import (
+    CACHE_FILENAME, VECTORS_CACHE_FILENAME,
+    CREDITS_PATH, KEYWORDS_PATH, LINKS_PATH, MOVIES_PATH, RATINGS_PATH,
+)
 
 
 def get_cache_path(filename):
@@ -53,11 +53,11 @@ def clear_all():
 
 
 def load_all_data_with_cache(
-    credits_path="data/credits.csv",
-    keywords_path="data/keywords.csv",
-    links_path="data/links.csv",
-    movies_path="data/movies_metadata.csv",
-    ratings_path="data/ratings.csv",
+    credits_path=CREDITS_PATH,
+    keywords_path=KEYWORDS_PATH,
+    links_path=LINKS_PATH,
+    movies_path=MOVIES_PATH,
+    ratings_path=RATINGS_PATH,
     force_rebuild=False
 ):
     """
@@ -106,11 +106,11 @@ def get_vectors_with_cache(profiles, force_rebuild=False):
 
 
 def load_everything(
-    credits_path="data/credits.csv",
-    keywords_path="data/keywords.csv",
-    links_path="data/links.csv",
-    movies_path="data/movies_metadata.csv",
-    ratings_path="data/ratings.csv",
+    credits_path=CREDITS_PATH,
+    keywords_path=KEYWORDS_PATH,
+    links_path=LINKS_PATH,
+    movies_path=MOVIES_PATH,
+    ratings_path=RATINGS_PATH,
     force_rebuild=False
 ):
     profiles, ratings_by_movie, ratings_by_user = load_all_data_with_cache(

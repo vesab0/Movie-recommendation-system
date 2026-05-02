@@ -3,59 +3,48 @@ from content_knn import ContentKNN
 from collaborative_knn import CollaborativeKNN
 from distance_functions import cosine_distance, cosine_similarity
 import vectorizer
+from config import (
+    CONTENT_WEIGHT, COLLAB_WEIGHT,
+    HYBRID_CONTENT_K, HYBRID_COLLAB_K,
+    COLLAB_CONFIDENCE_SCALE, CONSENSUS_BONUS_WEIGHT,
+)
 
 class HybridRecommender:
-    
-    def __init__(self, content_knn, collaborative_knn, content_weight=0.85, collab_weight=0.15):
+
+    def __init__(self, content_knn, collaborative_knn, content_weight=CONTENT_WEIGHT, collab_weight=COLLAB_WEIGHT):
         self.content_knn = content_knn
         self.collaborative_knn = collaborative_knn
         self.content_weight = content_weight
         self.collab_weight = collab_weight
-    
-    def recommend(self, movie_id, k=10, content_k=20, collab_k=20):
+
+    def recommend(self, movie_id, k=10, content_k=HYBRID_CONTENT_K, collab_k=HYBRID_COLLAB_K):
         content_recs = self.content_knn.recommend(movie_id, k=content_k)
         collab_recs = self.collaborative_knn.recommend(movie_id, k=collab_k)
-        
-        # --- Normalize content scores ---
-        content_scores = {}
-        if content_recs:
-            # Convert distance to similarity
-            raw_sims = [(r['movie_id'], 1.0 - (r['distance'] / 2.0)) for r in content_recs]
-            min_sim = min(s for _, s in raw_sims)
-            max_sim = max(s for _, s in raw_sims)
-            sim_range = max_sim - min_sim if max_sim > min_sim else 1.0
-            
-            for mid, sim in raw_sims:
-                normalized = (sim - min_sim) / sim_range
-                content_scores[mid] = normalized
-        
-        # --- Normalize collaborative scores ---
-        collab_scores = {}
-        if collab_recs:
-            raw_sims = [(r['movie_id'], max(0.0, r['similarity'])) for r in collab_recs]
-            min_sim = min(s for _, s in raw_sims)
-            max_sim = max(s for _, s in raw_sims)
-            sim_range = max_sim - min_sim if max_sim > min_sim else 1.0
-            
-            for mid, sim in raw_sims:
-                normalized = (sim - min_sim) / sim_range
-                collab_scores[mid] = normalized
-        
+
+        # Raw similarities — cosine distance in [0,1] for non-negative vectors,
+        # so similarity = 1 - distance is already in [0,1]. No normalization needed.
+        content_scores = {r['movie_id']: 1.0 - r['distance'] for r in content_recs}
+        collab_scores = {r['movie_id']: max(0.0, r['similarity']) for r in collab_recs}
+
+        # Adaptive collab weight: scale down for movies with few ratings
+        rating_count = len(self.collaborative_knn.ratings_by_movie.get(movie_id, {}))
+        confidence = min(1.0, rating_count / COLLAB_CONFIDENCE_SCALE)
+        eff_collab_w = self.collab_weight * confidence
+        eff_content_w = 1.0 - eff_collab_w
+
         # --- Merge ---
         all_movie_ids = set(content_scores.keys()) | set(collab_scores.keys())
-        
+
         final_scores = {}
         for mid in all_movie_ids:
-            c_score = content_scores.get(mid, 0.0) * self.content_weight
-            l_score = collab_scores.get(mid, 0.0) * self.collab_weight
-            
-            # Consensus boost: both paths agree
+            c_score = content_scores.get(mid, 0.0) * eff_content_w
+            l_score = collab_scores.get(mid, 0.0) * eff_collab_w
+
             if mid in content_scores and mid in collab_scores:
-                consensus_bonus = 0.1 * (content_scores[mid] + collab_scores[mid]) / 2
+                consensus_bonus = CONSENSUS_BONUS_WEIGHT * (content_scores[mid] + collab_scores[mid]) / 2
             else:
                 consensus_bonus = 0.0
 
-            final_scores[mid] = c_score + l_score + consensus_bonus
             final_scores[mid] = c_score + l_score + consensus_bonus
         
         # --- Rank and return ---
