@@ -76,9 +76,10 @@ def pick_movie(profiles):
 
 def main():
     print("Loading data and building recommenders...")
-    profiles, ratings_by_movie, ratings_by_user, vectors = cache_manager.load_everything()
-    
-    content_knn = ContentKNN(vectors, profiles)
+    profiles, ratings_by_movie, ratings_by_user, vectors, kmeans = cache_manager.load_everything()
+
+    print("\nInitializing recommenders...")
+    content_knn = ContentKNN(vectors, profiles, kmeans=kmeans, search_radius=1)
     collab_knn = CollaborativeKNN(ratings_by_movie, ratings_by_user, profiles, min_common_users=MIN_COMMON_USERS)
     hybrid = HybridRecommender(content_knn, collab_knn, content_weight=CONTENT_WEIGHT, collab_weight=COLLAB_WEIGHT)
     multi = MultiMovieRecommender(hybrid)
@@ -86,7 +87,6 @@ def main():
     print(f"\nLoaded {len(profiles)} movies. Ready.\n")
     
     while True:
-        # Collect movies from user
         selected_movies = []
         
         print("Add movies you like (type 'done' when finished, 'cancel' to start over):")
@@ -108,7 +108,6 @@ def main():
             if mid == 'done':
                 break
             
-            # Avoid duplicates
             if mid in [m[0] for m in selected_movies]:
                 print(f"  '{title}' already in list. Skipping.")
                 continue
@@ -120,13 +119,12 @@ def main():
             print("No movies selected. Try again or type 'quit' to exit.\n")
             continue
         
-        # Show collected movies
         print(f"\n{'=' * 60}")
         print(f"YOUR MOVIES ({len(selected_movies)}):")
         for i, (mid, title) in enumerate(selected_movies, 1):
-            print(f"  {i}. {title}")
+            cluster = kmeans.labels.get(mid, 'N/A')
+            print(f"  {i}. {title} (Cluster: {cluster})")
         
-        # Get recommendations
         movie_ids = [mid for mid, _ in selected_movies]
         
         print(f"\n{'=' * 60}")
@@ -139,11 +137,11 @@ def main():
             print("No recommendations found.")
         else:
             for i, rec in enumerate(recs, 1):
-                print(f"{i:2d}. {rec['title']:<35} | Score: {rec['final_score']:.3f} | {', '.join(rec['genres'][:3])}")
+                cluster = kmeans.labels.get(rec['movie_id'], 'N/A')
+                print(f"{i:2d}. {rec['title']:<35} | Score: {rec['final_score']:.3f} | Cluster: {cluster} | {', '.join(rec['genres'][:3])}")
         
         print(f"{'=' * 60}\n")
         
-        # Ask to continue or quit
         again = input("Search again? (y/n): ").strip().lower()
         if again not in ('y', 'yes'):
             print("Goodbye!")

@@ -46,3 +46,7 @@ KEYWORDS_PATH = "data/keywords.csv"
 LINKS_PATH    = "data/links.csv"
 MOVIES_PATH   = "data/movies_metadata.csv"
 RATINGS_PATH  = "data/ratings.csv"
+
+CLUSTERS_CACHE_FILENAME = "clusters_cache.pkl"
+N_CLUSTERS = 50
+CLUSTER_SEARCH_RADIUS = 1
