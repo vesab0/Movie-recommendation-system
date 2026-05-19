@@ -1,5 +1,3 @@
-(# Movie Predictor — FastAPI Service)
-
 This repository contains a FastAPI wrapper around a hybrid movie recommender. It exposes HTTP endpoints for browsing the built-in catalog, searching titles, requesting recommendations (by TMDB or internal ML ID) and injecting a new movie into the live model without a full rebuild.
 
 **Key features:**
