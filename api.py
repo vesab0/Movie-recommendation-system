@@ -8,7 +8,12 @@ to internal MovieLens IDs via the links dataset built into profiles.
 
 import sys
 import os
+import re
+import urllib.request
+import urllib.parse
+import json
 from threading import Lock
+from concurrent.futures import ThreadPoolExecutor, as_completed
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi import FastAPI, HTTPException
@@ -178,20 +183,121 @@ def _enrich_with_tmdb(recs: list[dict]) -> list[RecommendationResult]:
 
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 
+_POSTER_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cached-data", "poster_cache.json")
+
+# In-memory cache: "Title|Year" -> poster URL  (empty string = confirmed missing)
+_poster_cache: dict[str, str] = {}
+_poster_cache_lock = Lock()
+
+
+def _cache_key(title: str, year: str) -> str:
+    return f"{title.lower().strip()}|{year[:4] if year else ''}"
+
+
+def _load_poster_cache() -> None:
+    global _poster_cache
+    try:
+        if os.path.exists(_POSTER_CACHE_FILE):
+            with open(_POSTER_CACHE_FILE, "r") as f:
+                _poster_cache = json.load(f)
+            print(f"Poster cache loaded: {len(_poster_cache)} entries")
+    except Exception as e:
+        print(f"Warning: could not load poster cache: {e}")
+
+
+def _save_poster_cache() -> None:
+    try:
+        os.makedirs(os.path.dirname(_POSTER_CACHE_FILE), exist_ok=True)
+        with _poster_cache_lock:
+            snapshot = dict(_poster_cache)
+        with open(_POSTER_CACHE_FILE, "w") as f:
+            json.dump(snapshot, f)
+    except Exception as e:
+        print(f"Warning: could not save poster cache: {e}")
+
+
+def _fetch_poster_by_title(title: str, year: str) -> tuple[str, str]:
+    """Search TMDB public search endpoint by title, return (cache_key, poster_url).
+    No API key required. Picks the result whose title matches best and year is closest."""
+    key = _cache_key(title, year)
+    try:
+        q = urllib.parse.quote(title)
+        url = f"https://www.themoviedb.org/search/multi?language=en-US&query={q}&include_adult=false"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read())
+
+        results = [r for r in data.get("results", []) if r.get("media_type") in ("movie", None) and r.get("poster_path")]
+        if not results:
+            return key, ""
+
+        # Score: exact title match first, then proximity to expected year
+        target_year = int(year[:4]) if year and year[:4].isdigit() else 0
+        def score(r):
+            rtitle = (r.get("title") or r.get("name") or "").lower().strip()
+            rdate = r.get("release_date") or r.get("first_air_date") or ""
+            ryear = int(rdate[:4]) if rdate and rdate[:4].isdigit() else 0
+            exact = 1 if rtitle == title.lower().strip() else 0
+            year_diff = abs(ryear - target_year) if target_year and ryear else 999
+            return (-exact, year_diff)
+
+        results.sort(key=score)
+        best = results[0]
+        path = best["poster_path"]
+        return key, f"{TMDB_IMAGE_BASE}{path}"
+    except Exception:
+        return key, ""
+
+
+def _enrich_posters(cards: list[dict]) -> list[dict]:
+    """Fill in posterUrl for all cards by searching TMDB by title+year (no API key needed).
+    Fetches missing entries in parallel, saves cache to disk when new entries are added."""
+    missing: list[tuple[str, str, str]] = []  # (cache_key, title, year)
+    for card in cards:
+        key = _cache_key(card.get("title", ""), card.get("releaseDate", ""))
+        with _poster_cache_lock:
+            if key not in _poster_cache:
+                missing.append((key, card.get("title", ""), card.get("releaseDate", "")))
+
+    if missing:
+        with ThreadPoolExecutor(max_workers=min(len(missing), 20)) as pool:
+            futures = {pool.submit(_fetch_poster_by_title, title, year): key
+                       for key, title, year in missing}
+            for future in as_completed(futures):
+                key, url = future.result()
+                with _poster_cache_lock:
+                    _poster_cache[key] = url
+        _save_poster_cache()
+
+    for card in cards:
+        key = _cache_key(card.get("title", ""), card.get("releaseDate", ""))
+        with _poster_cache_lock:
+            card["posterUrl"] = _poster_cache.get(key, "")
+    return cards
+
+
+# Load poster cache from disk at startup
+_load_poster_cache()
+
 
 def _profile_to_card(mid: int, p: dict) -> dict:
     tmdb_raw = p.get("tmdbId")
     tmdb_id = int(tmdb_raw) if tmdb_raw and str(tmdb_raw).isdigit() else None
-    poster_path = p.get("poster_path") or ""
+    title = p.get("title", "Unknown")
+    release_date = p.get("release_date", "")
+    poster_path = (p.get("poster_path") or "").strip().strip("'\"")
+    # Use cache if already populated for this title+year
+    with _poster_cache_lock:
+        poster_url = _poster_cache.get(_cache_key(title, release_date), "")
     return {
         "movieLensId": mid,
         "tmdbId": tmdb_id,
-        "title": p.get("title", "Unknown"),
+        "title": title,
         "genres": [g["name"] for g in p.get("genres", [])],
-        "releaseDate": p.get("release_date", ""),
+        "releaseDate": release_date,
         "voteAverage": p.get("vote_average", 0),
         "posterPath": poster_path,
-        "posterUrl": f"{TMDB_IMAGE_BASE}{poster_path}" if poster_path else "",
+        "posterUrl": poster_url,
     }
 
 
@@ -206,11 +312,11 @@ def browse(limit: int = 40, offset: int = 0):
     scored = [
         (mid, p, p.get("vote_count", 0) * p.get("vote_average", 0))
         for mid, p in profiles.items()
-        if p.get("poster_path")  # only movies with a poster
     ]
     scored.sort(key=lambda x: x[2], reverse=True)
     page = scored[offset : offset + limit]
-    return [_profile_to_card(mid, p) for mid, p, _ in page]
+    cards = [_profile_to_card(mid, p) for mid, p, _ in page]
+    return _enrich_posters(cards)
 
 
 @app.get("/search")
@@ -231,7 +337,8 @@ def search(q: str, limit: int = 20):
             -(x[1].get("vote_count", 0) * x[1].get("vote_average", 0)),
         )
     )
-    return [_profile_to_card(mid, p) for mid, p in results[:limit]]
+    cards = [_profile_to_card(mid, p) for mid, p in results[:limit]]
+    return _enrich_posters(cards)
 
 
 @app.post("/similar/by-tmdb", response_model=list[RecommendationResult])
