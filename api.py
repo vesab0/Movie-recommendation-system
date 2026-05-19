@@ -16,13 +16,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 
+import numpy as np
+
 import cacher
-from config import LINKS_PATH, MOVIES_PATH
+from config import LINKS_PATH, MOVIES_PATH, CLUSTER_SEARCH_RADIUS
 import loader
 from content_knn import ContentKNN
 from collaborative_knn import CollaborativeKNN
 from hybrid_recommender import HybridRecommender
 from multi_movie_recommender import MultiMovieRecommender
+from vectorizer import ContentVectorizer
 
 app = FastAPI(title="Cinema Movie Recommender", version="1.0.0")
 
@@ -78,11 +81,12 @@ content_knn = None
 collab_knn = None
 hybrid = None
 multi = None
+vectorizer: Optional[ContentVectorizer] = None
 _recommender_lock = Lock()
 
 
 def _ensure_recommenders():
-    global ratings_by_movie, ratings_by_user, vectors, kmeans, content_knn, collab_knn, hybrid, multi
+    global ratings_by_movie, ratings_by_user, vectors, kmeans, content_knn, collab_knn, hybrid, multi, vectorizer
 
     if hybrid is not None and multi is not None:
         return
@@ -99,7 +103,14 @@ def _ensure_recommenders():
         vectors = vectors_full
         kmeans = kmeans_full
 
-        content_knn = ContentKNN(vectors_full, profiles_full, kmeans=kmeans_full)
+        # Rebuild vectorizer vocabulary from profiles so we can inject new movies later.
+        # fit() only builds dicts — it's fast and produces the exact same vocabulary as
+        # the one used when vectors_full was originally created.
+        _vect = ContentVectorizer()
+        _vect.fit(profiles_full)
+        vectorizer = _vect
+
+        content_knn = ContentKNN(vectors_full, profiles_full, kmeans=kmeans_full, search_radius=CLUSTER_SEARCH_RADIUS)
         collab_knn = CollaborativeKNN(ratings_by_movie_full, ratings_by_user_full, profiles_full)
         hybrid = HybridRecommender(content_knn, collab_knn)
         multi = MultiMovieRecommender(hybrid)
@@ -242,4 +253,140 @@ def get_similar_by_tmdb_multi(req: SimilarByTmdbMultiRequest):
     if not ml_ids:
         raise HTTPException(status_code=404, detail="None of the provided TMDB IDs found in dataset")
     recs = multi.recommend(ml_ids, k=req.top_k)
+    return _enrich_with_tmdb(recs)
+
+
+class InjectMovieRequest(BaseModel):
+    title: str
+    genres: list[str] = []
+    keywords: list[str] = []
+    cast: list[str] = []
+    director: Optional[str] = None
+    overview: Optional[str] = None
+    collection: Optional[str] = None
+    runtime: Optional[float] = None
+    release_date: Optional[str] = None
+    tmdb_id: Optional[int] = None
+
+
+class InjectMovieResponse(BaseModel):
+    ml_id: int
+    cluster_id: int
+
+
+class SimilarByMlIdRequest(BaseModel):
+    ml_id: int
+    top_k: int = 20
+
+
+@app.post("/inject-movie", response_model=InjectMovieResponse)
+def inject_movie(req: InjectMovieRequest):
+    """
+    Inject a new movie into the live ML model without a full rebuild.
+    Vectorizes the provided metadata using the existing vocabulary, assigns it to the
+    nearest cluster, and registers it in all in-memory recommender structures.
+    Unknown genres/keywords/actors receive zero weight (graceful degradation).
+    """
+    _ensure_recommenders()
+
+    # Assign a new internal ID that won't collide with existing Kaggle IDs
+    new_id = max(vectors.keys()) + 1
+
+    # Build a profile dict in the same shape as Kaggle profiles
+    profile: dict = {
+        "id": new_id,
+        "title": req.title,
+        "overview": req.overview or "",
+        "release_date": req.release_date or "",
+        "runtime": req.runtime or 0,
+        "budget": 0,
+        "revenue": 0,
+        "vote_average": 0,
+        "vote_count": 0,
+        "imdb_id": None,
+        "tmdbId": req.tmdb_id,
+        "poster_path": "",
+        "genres": [{"name": g} for g in req.genres],
+        "keywords": [{"name": k} for k in req.keywords],
+        "cast": [{"name": n, "order": i} for i, n in enumerate(req.cast)],
+        "crew": ([{"name": req.director, "job": "Director"}] if req.director else []),
+        "production_companies": [],
+        "production_countries": [],
+        "spoken_languages": [],
+        "belongs_to_collection": ({"name": req.collection} if req.collection else None),
+    }
+
+    # Normalize genres/cast/director against the actual vocabulary (case-insensitive).
+    # The vectorizer does exact string matching, so "fantasy" ≠ "Fantasy".
+    genre_vocab_lower   = {g.lower(): g for g in vectorizer.genre_to_index}
+    cast_vocab_lower    = {a.lower(): a for a in vectorizer.cast_to_index}
+    crew_vocab_lower    = {c.lower(): c for c in vectorizer.crew_job_to_index}
+
+    profile["genres"] = [
+        {"name": genre_vocab_lower[g.lower()]}
+        for g in req.genres if g.lower() in genre_vocab_lower
+    ]
+    profile["cast"] = [
+        {"name": cast_vocab_lower[n.lower()], "order": i}
+        for i, n in enumerate(req.cast) if n.lower() in cast_vocab_lower
+    ]
+    if req.director:
+        crew_key = f"director:{req.director.lower()}"
+        if crew_key in crew_vocab_lower:
+            profile["crew"] = [{"name": crew_vocab_lower[crew_key].split(":", 1)[1], "job": "Director"}]
+
+    matched_genres    = [g["name"] for g in profile["genres"]]
+    matched_cast      = [a["name"] for a in profile["cast"]]
+    matched_crew      = [m["name"] for m in profile["crew"]]
+    unmatched_genres  = [g for g in req.genres  if g.lower() not in genre_vocab_lower]
+    unmatched_cast    = [n for n in req.cast     if n.lower() not in cast_vocab_lower]
+    print(f"[inject] '{req.title}': matched genres={matched_genres} cast={matched_cast} crew={matched_crew}")
+    if unmatched_genres or unmatched_cast:
+        print(f"[inject] '{req.title}': NOT IN VOCAB genres={unmatched_genres} cast={unmatched_cast}")
+
+    # Vectorize using the existing vocabulary
+    vector = vectorizer.vectorize(profile)
+    nonzero_count = int(np.count_nonzero(vector))
+    print(f"[inject] '{req.title}': {nonzero_count} non-zero vector dimensions")
+
+    # Assign to nearest existing cluster — no refit needed
+    cluster_id = int(kmeans.predict(vector))
+
+    # --- Update all in-memory structures ---
+    vectors[new_id] = vector
+    profiles[new_id] = {
+        "title": req.title,
+        "genres": profile["genres"],
+        "release_date": req.release_date or "",
+        "vote_count": 0,
+        "vote_average": 0,
+        "poster_path": "",
+        "tmdbId": req.tmdb_id,
+    }
+
+    # ContentKNN
+    content_knn.vectors[new_id] = vector
+    content_knn.profiles[new_id] = profile
+    content_knn._nonzero_indices[new_id] = set(np.nonzero(vector)[0])
+    content_knn.kmeans.labels[new_id] = cluster_id
+
+    # CollaborativeKNN — new movie starts cold (no ratings)
+    collab_knn.ratings_by_movie[new_id] = []
+    collab_knn._movie_ratings_dict[new_id] = {}
+    collab_knn.profiles[new_id] = profile
+
+    # TMDB ID index
+    if req.tmdb_id is not None:
+        tmdb_to_movielens[req.tmdb_id] = new_id
+
+    return InjectMovieResponse(ml_id=new_id, cluster_id=cluster_id)
+
+
+@app.post("/similar/by-ml-id", response_model=list[RecommendationResult])
+def get_similar_by_ml_id(req: SimilarByMlIdRequest):
+    """Find movies similar to one identified by its internal ML ID (used for injected movies)."""
+    _ensure_recommenders()
+    if req.ml_id not in vectors:
+        raise HTTPException(status_code=404, detail=f"ML ID {req.ml_id} not found")
+    recs = hybrid.recommend(req.ml_id, k=req.top_k)
     return _enrich_with_tmdb(recs)
