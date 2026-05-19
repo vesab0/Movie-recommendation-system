@@ -17,7 +17,6 @@ build/
 .coverage
 htmlcov/
 cached-data/
-data/
 clusters_cache.pkl
 *.pkl
 *.npz
