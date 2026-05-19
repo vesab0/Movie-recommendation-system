@@ -1,7 +1,6 @@
 import numpy as np
 from content_knn import ContentKNN
 from collaborative_knn import CollaborativeKNN
-from distance_functions import cosine_distance, cosine_similarity
 import vectorizer
 from config import (
     CONTENT_WEIGHT, COLLAB_WEIGHT,

@@ -1,14 +1,6 @@
 import numpy as np
 
 
-def euclidean_distance(v1, v2):
-    return np.linalg.norm(v1 - v2)
-
-
-def manhattan_distance(v1, v2):
-    return np.sum(np.abs(v1 - v2))
-
-
 def cosine_similarity(v1, v2):
     dot = np.dot(v1, v2)
     norm1 = np.linalg.norm(v1)

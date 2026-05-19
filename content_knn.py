@@ -1,4 +1,4 @@
-from distance_functions import cosine_distance, cosine_similarity
+from distance_functions import cosine_distance
 import numpy as np
 
 

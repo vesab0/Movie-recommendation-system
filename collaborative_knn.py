@@ -1,4 +1,3 @@
-from distance_functions import cosine_similarity, cosine_distance
 from config import MIN_COMMON_USERS
 
 
@@ -59,9 +58,8 @@ class CollaborativeKNN:
                 continue
             if other_id not in self.profiles or not self.profiles[other_id].get('title'):
                 continue
-            
-            if sim > 0:
-                similarities.append((other_id, sim))
+
+            similarities.append((other_id, sim))
         
         similarities.sort(key=lambda x: x[1], reverse=True)
         
