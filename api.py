@@ -1,11 +1,3 @@
-"""
-FastAPI wrapper for the hybrid movie recommender.
-Run with: uvicorn api:app --port 8001 --reload
-
-Accepts TMDB IDs (the public IDs used by cinema apps) and maps them
-to internal MovieLens IDs via the links dataset built into profiles.
-"""
-
 import sys
 import os
 import re
@@ -34,28 +26,15 @@ from vectorizer import ContentVectorizer
 
 app = FastAPI(title="Cinema Movie Recommender", version="1.0.0")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5000",
-        "http://localhost:5173",
-        "http://localhost:5174",
-    ],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000", "http://localhost:5000", "http://localhost:5173", "http://localhost:5174"], allow_methods=["*"], allow_headers=["*"])
+
 
 def _load_catalog() -> dict[int, dict]:
     print("Loading lightweight movie catalog...")
     movies = loader.load_movies_metadata(MOVIES_PATH)
     links = loader.load_links(LINKS_PATH)
 
-    tmdb_by_movie_id = {
-        row["movieId"]: row.get("tmdbId")
-        for row in links
-        if row.get("movieId") is not None
-    }
+    tmdb_by_movie_id = {row["movieId"]: row.get("tmdbId") for row in links if row.get("movieId") is not None}
 
     catalog: dict[int, dict] = {}
     for movie in movies:
@@ -108,9 +87,6 @@ def _ensure_recommenders():
         vectors = vectors_full
         kmeans = kmeans_full
 
-        # Rebuild vectorizer vocabulary from profiles so we can inject new movies later.
-        # fit() only builds dicts — it's fast and produces the exact same vocabulary as
-        # the one used when vectors_full was originally created.
         _vect = ContentVectorizer()
         _vect.fit(profiles_full)
         vectorizer = _vect
@@ -131,12 +107,8 @@ def _ensure_recommenders():
                 "tmdbId": profile.get("tmdbId"),
             }
 
-# Build TMDB ID → MovieLens ID index
-tmdb_to_movielens: dict[int, int] = {
-    int(p["tmdbId"]): mid
-    for mid, p in profiles.items()
-    if p.get("tmdbId") and str(p["tmdbId"]).isdigit()
-}
+
+tmdb_to_movielens: dict[int, int] = {int(p["tmdbId"]): mid for mid, p in profiles.items() if p.get("tmdbId") and str(p["tmdbId"]).isdigit()}
 
 print(f"Recommender ready. {len(profiles)} movies loaded, {len(tmdb_to_movielens)} have TMDB IDs.")
 
@@ -162,22 +134,13 @@ class RecommendationResult(BaseModel):
 
 
 def _enrich_with_tmdb(recs: list[dict]) -> list[RecommendationResult]:
-    """Add tmdbId to each recommendation result from the profiles data."""
     results = []
     for r in recs:
         mid = r["movie_id"]
         profile = profiles.get(mid, {})
         tmdb_raw = profile.get("tmdbId")
         tmdb_id = int(tmdb_raw) if tmdb_raw and str(tmdb_raw).isdigit() else None
-        results.append(RecommendationResult(
-            movie_id=mid,
-            title=r.get("title", "Unknown"),
-            final_score=r.get("final_score", 0.0),
-            from_content=r.get("from_content"),
-            from_collab=r.get("from_collab"),
-            genres=r.get("genres", []),
-            tmdb_id=tmdb_id,
-        ))
+        results.append(RecommendationResult(movie_id=mid, title=r.get("title", "Unknown"), final_score=r.get("final_score", 0.0), from_content=r.get("from_content"), from_collab=r.get("from_collab"), genres=r.get("genres", []), tmdb_id=tmdb_id))
     return results
 
 
@@ -185,7 +148,6 @@ TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 
 _POSTER_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cached-data", "poster_cache.json")
 
-# In-memory cache: "Title|Year" -> poster URL  (empty string = confirmed missing)
 _poster_cache: dict[str, str] = {}
 _poster_cache_lock = Lock()
 
@@ -217,8 +179,6 @@ def _save_poster_cache() -> None:
 
 
 def _fetch_poster_by_title(title: str, year: str) -> tuple[str, str]:
-    """Search TMDB public search endpoint by title, return (cache_key, poster_url).
-    No API key required. Picks the result whose title matches best and year is closest."""
     key = _cache_key(title, year)
     try:
         q = urllib.parse.quote(title)
@@ -231,7 +191,6 @@ def _fetch_poster_by_title(title: str, year: str) -> tuple[str, str]:
         if not results:
             return key, ""
 
-        # Score: exact title match first, then proximity to expected year
         target_year = int(year[:4]) if year and year[:4].isdigit() else 0
         def score(r):
             rtitle = (r.get("title") or r.get("name") or "").lower().strip()
@@ -250,9 +209,7 @@ def _fetch_poster_by_title(title: str, year: str) -> tuple[str, str]:
 
 
 def _enrich_posters(cards: list[dict]) -> list[dict]:
-    """Fill in posterUrl for all cards by searching TMDB by title+year (no API key needed).
-    Fetches missing entries in parallel, saves cache to disk when new entries are added."""
-    missing: list[tuple[str, str, str]] = []  # (cache_key, title, year)
+    missing: list[tuple[str, str, str]] = []
     for card in cards:
         key = _cache_key(card.get("title", ""), card.get("releaseDate", ""))
         with _poster_cache_lock:
@@ -261,8 +218,7 @@ def _enrich_posters(cards: list[dict]) -> list[dict]:
 
     if missing:
         with ThreadPoolExecutor(max_workers=min(len(missing), 20)) as pool:
-            futures = {pool.submit(_fetch_poster_by_title, title, year): key
-                       for key, title, year in missing}
+            futures = {pool.submit(_fetch_poster_by_title, title, year): key for key, title, year in missing}
             for future in as_completed(futures):
                 key, url = future.result()
                 with _poster_cache_lock:
@@ -276,7 +232,6 @@ def _enrich_posters(cards: list[dict]) -> list[dict]:
     return cards
 
 
-# Load poster cache from disk at startup
 _load_poster_cache()
 
 
@@ -286,7 +241,6 @@ def _profile_to_card(mid: int, p: dict) -> dict:
     title = p.get("title", "Unknown")
     release_date = p.get("release_date", "")
     poster_path = (p.get("poster_path") or "").strip().strip("'\"")
-    # Use cache if already populated for this title+year
     with _poster_cache_lock:
         poster_url = _poster_cache.get(_cache_key(title, release_date), "")
     return {
@@ -308,11 +262,7 @@ def health():
 
 @app.get("/browse")
 def browse(limit: int = 40, offset: int = 0):
-    """Return top movies by vote count × average rating (quality proxy)."""
-    scored = [
-        (mid, p, p.get("vote_count", 0) * p.get("vote_average", 0))
-        for mid, p in profiles.items()
-    ]
+    scored = [(mid, p, p.get("vote_count", 0) * p.get("vote_average", 0)) for mid, p in profiles.items()]
     scored.sort(key=lambda x: x[2], reverse=True)
     page = scored[offset : offset + limit]
     cards = [_profile_to_card(mid, p) for mid, p, _ in page]
@@ -321,29 +271,17 @@ def browse(limit: int = 40, offset: int = 0):
 
 @app.get("/search")
 def search(q: str, limit: int = 20):
-    """Search movies in the dataset by title (case-insensitive substring)."""
     q_lower = q.strip().lower()
     if not q_lower:
         return []
-    results = [
-        (mid, p)
-        for mid, p in profiles.items()
-        if q_lower in p.get("title", "").lower()
-    ]
-    # Sort: exact match first, then by popularity
-    results.sort(
-        key=lambda x: (
-            not x[1].get("title", "").lower().startswith(q_lower),
-            -(x[1].get("vote_count", 0) * x[1].get("vote_average", 0)),
-        )
-    )
+    results = [(mid, p) for mid, p in profiles.items() if q_lower in p.get("title", "").lower()]
+    results.sort(key=lambda x: (not x[1].get("title", "").lower().startswith(q_lower), -(x[1].get("vote_count", 0) * x[1].get("vote_average", 0))))
     cards = [_profile_to_card(mid, p) for mid, p in results[:limit]]
     return _enrich_posters(cards)
 
 
 @app.post("/similar/by-tmdb", response_model=list[RecommendationResult])
 def get_similar_by_tmdb(req: SimilarByTmdbRequest):
-    """Find movies similar to the one identified by its TMDB ID."""
     _ensure_recommenders()
     ml_id = tmdb_to_movielens.get(req.tmdb_id)
     if ml_id is None:
@@ -354,7 +292,6 @@ def get_similar_by_tmdb(req: SimilarByTmdbRequest):
 
 @app.post("/similar/by-tmdb-multi", response_model=list[RecommendationResult])
 def get_similar_by_tmdb_multi(req: SimilarByTmdbMultiRequest):
-    """Find movies similar to a list of movies identified by their TMDB IDs (uses RRF fusion)."""
     _ensure_recommenders()
     ml_ids = [tmdb_to_movielens[t] for t in req.tmdb_ids if t in tmdb_to_movielens]
     if not ml_ids:
@@ -388,18 +325,10 @@ class SimilarByMlIdRequest(BaseModel):
 
 @app.post("/inject-movie", response_model=InjectMovieResponse)
 def inject_movie(req: InjectMovieRequest):
-    """
-    Inject a new movie into the live ML model without a full rebuild.
-    Vectorizes the provided metadata using the existing vocabulary, assigns it to the
-    nearest cluster, and registers it in all in-memory recommender structures.
-    Unknown genres/keywords/actors receive zero weight (graceful degradation).
-    """
     _ensure_recommenders()
 
-    # Assign a new internal ID that won't collide with existing Kaggle IDs
     new_id = max(vectors.keys()) + 1
 
-    # Build a profile dict in the same shape as Kaggle profiles
     profile: dict = {
         "id": new_id,
         "title": req.title,
@@ -423,20 +352,12 @@ def inject_movie(req: InjectMovieRequest):
         "belongs_to_collection": ({"name": req.collection} if req.collection else None),
     }
 
-    # Normalize genres/cast/director against the actual vocabulary (case-insensitive).
-    # The vectorizer does exact string matching, so "fantasy" ≠ "Fantasy".
     genre_vocab_lower   = {g.lower(): g for g in vectorizer.genre_to_index}
     cast_vocab_lower    = {a.lower(): a for a in vectorizer.cast_to_index}
     crew_vocab_lower    = {c.lower(): c for c in vectorizer.crew_job_to_index}
 
-    profile["genres"] = [
-        {"name": genre_vocab_lower[g.lower()]}
-        for g in req.genres if g.lower() in genre_vocab_lower
-    ]
-    profile["cast"] = [
-        {"name": cast_vocab_lower[n.lower()], "order": i}
-        for i, n in enumerate(req.cast) if n.lower() in cast_vocab_lower
-    ]
+    profile["genres"] = [{"name": genre_vocab_lower[g.lower()]} for g in req.genres if g.lower() in genre_vocab_lower]
+    profile["cast"] = [{"name": cast_vocab_lower[n.lower()], "order": i} for i, n in enumerate(req.cast) if n.lower() in cast_vocab_lower]
     if req.director:
         crew_key = f"director:{req.director.lower()}"
         if crew_key in crew_vocab_lower:
@@ -451,15 +372,12 @@ def inject_movie(req: InjectMovieRequest):
     if unmatched_genres or unmatched_cast:
         print(f"[inject] '{req.title}': NOT IN VOCAB genres={unmatched_genres} cast={unmatched_cast}")
 
-    # Vectorize using the existing vocabulary
     vector = vectorizer.vectorize(profile)
     nonzero_count = int(np.count_nonzero(vector))
     print(f"[inject] '{req.title}': {nonzero_count} non-zero vector dimensions")
 
-    # Assign to nearest existing cluster — no refit needed
     cluster_id = int(kmeans.predict(vector))
 
-    # --- Update all in-memory structures ---
     vectors[new_id] = vector
     profiles[new_id] = {
         "title": req.title,
@@ -471,18 +389,15 @@ def inject_movie(req: InjectMovieRequest):
         "tmdbId": req.tmdb_id,
     }
 
-    # ContentKNN
     content_knn.vectors[new_id] = vector
     content_knn.profiles[new_id] = profile
     content_knn._nonzero_indices[new_id] = set(np.nonzero(vector)[0])
     content_knn.kmeans.labels[new_id] = cluster_id
 
-    # CollaborativeKNN — new movie starts cold (no ratings)
     collab_knn.ratings_by_movie[new_id] = []
     collab_knn._movie_ratings_dict[new_id] = {}
     collab_knn.profiles[new_id] = profile
 
-    # TMDB ID index
     if req.tmdb_id is not None:
         tmdb_to_movielens[req.tmdb_id] = new_id
 
@@ -491,7 +406,6 @@ def inject_movie(req: InjectMovieRequest):
 
 @app.post("/similar/by-ml-id", response_model=list[RecommendationResult])
 def get_similar_by_ml_id(req: SimilarByMlIdRequest):
-    """Find movies similar to one identified by its internal ML ID (used for injected movies)."""
     _ensure_recommenders()
     if req.ml_id not in vectors:
         raise HTTPException(status_code=404, detail=f"ML ID {req.ml_id} not found")

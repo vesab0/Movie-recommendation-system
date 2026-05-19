@@ -46,6 +46,30 @@ Configuration constants and dataset paths are defined in `config.py`. By default
 
 Cached artifacts (vector cache, poster cache) are stored under `cached-data/` by default. See `config.py` for cache filenames and cluster settings.
 
+Populating data
+---------------
+This repo does not commit the full Kaggle CSV files. The recommended flow is to use `kagglehub` to fetch the dataset and place the files into `data/`:
+
+1. Install `kagglehub`:
+
+```bash
+pip install kagglehub
+```
+
+2. Download the dataset (default slug is `rounakbanik/the-movies-dataset`):
+
+```bash
+python scripts/download_data.py
+```
+
+You can override the dataset slug or output directory:
+
+```bash
+python scripts/download_data.py --dataset rounakbanik/the-movies-dataset --out data
+```
+
+After `data/` is populated, the service will build vector/cluster caches on-demand the first time a recommendation is requested. Poster URLs are fetched lazily and cached in `cached-data/poster_cache.json` as users browse or search.
+
 API endpoints
 -------------
 - `GET /health` — basic health and movies-loaded inspection
