@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel
 from typing import Optional
 
@@ -211,6 +212,8 @@ def _fetch_poster_by_title(title: str, year: str) -> tuple[str, str]:
 def _enrich_posters(cards: list[dict]) -> list[dict]:
     missing: list[tuple[str, str, str]] = []
     for card in cards:
+        if card.get("posterUrl"):
+            continue
         key = _cache_key(card.get("title", ""), card.get("releaseDate", ""))
         with _poster_cache_lock:
             if key not in _poster_cache:
@@ -226,6 +229,8 @@ def _enrich_posters(cards: list[dict]) -> list[dict]:
         _save_poster_cache()
 
     for card in cards:
+        if card.get("posterUrl"):
+            continue
         key = _cache_key(card.get("title", ""), card.get("releaseDate", ""))
         with _poster_cache_lock:
             card["posterUrl"] = _poster_cache.get(key, "")
@@ -242,7 +247,8 @@ def _profile_to_card(mid: int, p: dict) -> dict:
     release_date = p.get("release_date", "")
     poster_path = (p.get("poster_path") or "").strip().strip("'\"")
     with _poster_cache_lock:
-        poster_url = _poster_cache.get(_cache_key(title, release_date), "")
+        cached_url = _poster_cache.get(_cache_key(title, release_date), "")
+    poster_url = cached_url  # stale poster_path hashes 404; let _enrich_posters fetch fresh URL
     return {
         "movieLensId": mid,
         "tmdbId": tmdb_id,
@@ -267,6 +273,22 @@ def browse(limit: int = 40, offset: int = 0):
     page = scored[offset : offset + limit]
     cards = [_profile_to_card(mid, p) for mid, p, _ in page]
     return _enrich_posters(cards)
+
+
+@app.get("/movie-poster")
+def movie_poster(title: str, year: str = ""):
+    key = _cache_key(title, year)
+    with _poster_cache_lock:
+        url = _poster_cache.get(key, "")
+    if not url:
+        _, url = _fetch_poster_by_title(title, year)
+        if url:
+            with _poster_cache_lock:
+                _poster_cache[key] = url
+            _save_poster_cache()
+    if url:
+        return RedirectResponse(url=url, status_code=302)
+    return Response(status_code=404)
 
 
 @app.get("/search")

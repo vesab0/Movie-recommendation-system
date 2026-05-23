@@ -29,10 +29,10 @@ pip install -r requirements.txt
 3. Run the FastAPI app (development):
 
 ```bash
-uvicorn api:app --port 8001 --reload
+uvicorn api:app --port 8000 --reload
 ```
 
-The API will be available at http://127.0.0.1:8001
+The API will be available at http://127.0.0.1:8000
 
 Configuration & data
 --------------------
@@ -85,13 +85,13 @@ Examples
 Health check:
 
 ```bash
-curl http://127.0.0.1:8001/health
+curl http://127.0.0.1:8000/health
 ```
 
 Search example:
 
 ```bash
-curl "http://127.0.0.1:8001/search?q=dark+knight&limit=10"
+curl "http://127.0.0.1:8000/search?q=dark+knight&limit=10"
 ```
 
 Recommend by TMDB:
@@ -99,7 +99,7 @@ Recommend by TMDB:
 ```bash
 curl -X POST -H "Content-Type: application/json" \
 	-d '{"tmdb_id":238, "top_k":10}' \
-	http://127.0.0.1:8001/similar/by-tmdb
+http://127.0.0.1:8000/similar/by-tmdb
 ```
 
 Development notes
@@ -110,14 +110,7 @@ Development notes
 
 Docker
 ------
-This repository includes a `Dockerfile` for building a containerized service. A typical build and run sequence:
-
-```bash
-docker build -t movie-predictor .
-docker run --rm -p 8001:8001 movie-predictor
-```
-
-If you mount local `data/` and `cached-data/` directories into the container, the service will use those files directly.
+This repository previously included container instructions. For local development we recommend using a Python virtual environment as described above and running the service directly on `localhost:8000`.
 
 Where to look next
 ------------------
